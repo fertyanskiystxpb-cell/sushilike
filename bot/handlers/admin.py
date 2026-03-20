@@ -29,7 +29,7 @@ def handle_admin_flow(vk, user_id, text, payload, event):
     if handle_admin_commands(vk, user_id, text):
         return True
 
-    if payload and handle_admin_payload(vk, payload):
+    if payload and handle_admin_payload(vk, user_id, payload):
         return True
 
     if handle_admin_message(vk, event):
@@ -124,7 +124,7 @@ def handle_admin_commands(vk, user_id, text):
     return False
 
 
-def handle_admin_payload(vk, payload):
+def handle_admin_payload(vk, admin_user_id, payload):
     """Обработка payload от инлайн-кнопок админа."""
     if isinstance(payload, str):
         try:
@@ -149,7 +149,7 @@ def handle_admin_payload(vk, payload):
     if order_entry is None and isinstance(order_id, str) and order_id.isdigit():
         order_entry = store.orders.get(int(order_id))
     if order_entry is None:
-        core.send_message(vk, core.ADMIN_ID, f"Не нашёл заказ #{order_id}.", keyboard=kbd.create_admin_menu_keyboard())
+        core.send_message(vk, admin_user_id, f"Не нашёл заказ #{order_id}.", keyboard=kbd.create_admin_menu_keyboard())
         return True
 
     oid = int(order_id) if isinstance(order_id, str) and order_id.isdigit() else order_id
@@ -171,14 +171,14 @@ def handle_admin_payload(vk, payload):
 
         if new_status:
             order_entry["status"] = new_status
-        store.admin_states[core.ADMIN_ID] = {
+        store.admin_states[admin_user_id] = {
             "state": "AWAITING_PRICE_WITH_MSG",
             "client_id": client_id,
             "order_id": oid,
             "base_msg": base_msg,
         }
         core.send_message(
-            vk, core.ADMIN_ID,
+            vk, admin_user_id,
             f"Ок. Теперь укажите цену для клиента ID {client_id} (например: 1490).",
             keyboard=kbd.create_admin_menu_keyboard(),
         )
@@ -192,43 +192,43 @@ def handle_admin_payload(vk, payload):
         return True
 
     if action == "CANCEL_ORDER":
-        store.admin_states[core.ADMIN_ID] = {"state": "AWAITING_CANCEL_REASON", "client_id": client_id, "order_id": oid}
+        store.admin_states[admin_user_id] = {"state": "AWAITING_CANCEL_REASON", "client_id": client_id, "order_id": oid}
         text = f"📩 Заказ #{oid}\n\n{order_entry.get('summary')}\n\n❌ Отмена: ожидаю причину от администратора."
         pm = (order_entry.get("order") or {}).get("payment_method")
         core.edit_admin_order_message(vk, oid, text, kbd.create_admin_processing_keyboard(oid, client_id, pm))
         core.send_message(
-            vk, core.ADMIN_ID,
+            vk, admin_user_id,
             f"Введите причину отмены для клиента ID {client_id}.\nЕсли причины нет — напишите: без причины",
             keyboard=kbd.create_admin_menu_keyboard(),
         )
         return True
 
     if action == "START_REPLY":
-        store.admin_states[core.ADMIN_ID] = {"state": "AWAITING_REPLY_TEXT", "client_id": client_id, "order_id": oid}
+        store.admin_states[admin_user_id] = {"state": "AWAITING_REPLY_TEXT", "client_id": client_id, "order_id": oid}
         text = f"📩 Заказ #{oid}\n\n{order_entry.get('summary')}\n\n✉ Ожидаю текст ответа админа."
         pm = (order_entry.get("order") or {}).get("payment_method")
         core.edit_admin_order_message(vk, oid, text, kbd.create_admin_processing_keyboard(oid, client_id, pm))
         core.send_message(
-            vk, core.ADMIN_ID,
+            vk, admin_user_id,
             f"Введите текст ответа клиенту ID {client_id}.",
             keyboard=kbd.create_admin_menu_keyboard(),
         )
         return True
 
     if action == "SET_PRICE":
-        store.admin_states[core.ADMIN_ID] = {"state": "AWAITING_PRICE", "client_id": client_id, "order_id": oid}
+        store.admin_states[admin_user_id] = {"state": "AWAITING_PRICE", "client_id": client_id, "order_id": oid}
         text = f"📩 Заказ #{oid}\n\n{order_entry.get('summary')}\n\n💰 Ожидаю цену от администратора."
         pm = (order_entry.get("order") or {}).get("payment_method")
         core.edit_admin_order_message(vk, oid, text, kbd.create_admin_processing_keyboard(oid, client_id, pm))
         core.send_message(
-            vk, core.ADMIN_ID,
+            vk, admin_user_id,
             f"Введите цену для клиента ID {client_id} (например: 1490).",
             keyboard=kbd.create_admin_menu_keyboard(),
         )
         return True
 
     if action == "ACCEPT_AND_REQUEST_PAYMENT":
-        store.admin_states[core.ADMIN_ID] = {
+        store.admin_states[admin_user_id] = {
             "state": "AWAITING_PRICE_ACCEPT_AND_REQUEST_PAYMENT",
             "client_id": client_id,
             "order_id": oid,
@@ -238,7 +238,7 @@ def handle_admin_payload(vk, payload):
         pm = (order_entry.get("order") or {}).get("payment_method")
         core.edit_admin_order_message(vk, oid, text, kbd.create_admin_processing_keyboard(oid, client_id, pm))
         core.send_message(
-            vk, core.ADMIN_ID,
+            vk, admin_user_id,
             f"Введите цену для клиента ID {client_id} (после этого бот запросит оплату переводом).",
             keyboard=kbd.create_admin_menu_keyboard(),
         )
@@ -248,7 +248,7 @@ def handle_admin_payload(vk, payload):
         order_entry["status"] = "PAID"
         core.send_message(vk, client_id, "Спасибо! Оплата получена, ваш заказ передан на кухню")
         core.reset_user_state(client_id)
-        core.send_message(vk, core.ADMIN_ID, "Клиенту отправлено подтверждение оплаты.", keyboard=kbd.create_admin_menu_keyboard())
+        core.send_message(vk, admin_user_id, "Клиенту отправлено подтверждение оплаты.", keyboard=kbd.create_admin_menu_keyboard())
         return True
 
     return False
@@ -271,7 +271,7 @@ def handle_admin_message(vk, event):
             if o["client_id"] == client_id and o["status"] != "CANCELLED":
                 o["status"] = "CANCELLED"
         core.send_message(
-            vk, core.ADMIN_ID,
+            vk, user_id,
             f"Ок. Заказ клиента ID {client_id} отменён. Причина: {reason}",
             keyboard=kbd.create_admin_menu_keyboard(),
         )
@@ -281,7 +281,7 @@ def handle_admin_message(vk, event):
     if state.get("state") == "AWAITING_REPLY_TEXT":
         if text:
             core.send_message(vk, client_id, f"✉ Сообщение от администратора:\n{text}")
-            core.send_message(vk, core.ADMIN_ID, f"Ответ отправлен клиенту ID {client_id}.", keyboard=kbd.create_admin_menu_keyboard())
+            core.send_message(vk, user_id, f"Ответ отправлен клиенту ID {client_id}.", keyboard=kbd.create_admin_menu_keyboard())
         store.admin_states.pop(user_id, None)
         return True
 
@@ -295,12 +295,12 @@ def handle_admin_message(vk, event):
                 o["price"] = price_text
                 payment_method = (o.get("order") or {}).get("payment_method")
         msg_lines = [f"💰 Стоимость вашего заказа: {price_text}₽"]
-        if payment_method == "Предоплата переводом":
+        if payment_method == "Переводом сейчас":
             msg_lines.append("")
             msg_lines.append("Реквизиты для перевода:")
             msg_lines.extend(core.TRANSFER_INFO_LINES)
         core.send_message(vk, client_id, "\n".join(msg_lines))
-        core.send_message(vk, core.ADMIN_ID, f"Цена отправлена клиенту ID {client_id}.", keyboard=kbd.create_admin_menu_keyboard())
+        core.send_message(vk, user_id, f"Цена отправлена клиенту ID {client_id}.", keyboard=kbd.create_admin_menu_keyboard())
         store.admin_states.pop(user_id, None)
         return True
 
@@ -314,7 +314,7 @@ def handle_admin_message(vk, event):
             store.orders[order_id]["price"] = price_text
         payment_method = (store.orders.get(order_id, {}).get("order") or {}).get("payment_method")
         summary = store.orders.get(order_id, {}).get("summary", "")
-        if payment_method == "Предоплата переводом":
+        if payment_method == "Переводом сейчас":
             msg_lines = [base_msg or "✅ Заказ принят.", f"💰 Сумма к оплате: {price_text}₽", "", *core.PAYMENT_REQUEST_LINES]
             u = core.get_user_state(client_id)
             u["state"] = STATE_WAITING_FOR_CHECK
@@ -324,7 +324,7 @@ def handle_admin_message(vk, event):
         else:
             msg_lines = [base_msg or "✅ Заказ принят.", f"💰 Сумма: {price_text}₽", "", "Детали заказа:", summary]
         core.send_message(vk, client_id, "\n".join([line for line in msg_lines if line is not None]))
-        core.send_message(vk, core.ADMIN_ID, "Статус и цена отправлены клиенту.", keyboard=kbd.create_admin_menu_keyboard())
+        core.send_message(vk, user_id, "Статус и цена отправлены клиенту.", keyboard=kbd.create_admin_menu_keyboard())
         store.admin_states.pop(user_id, None)
         return True
 
@@ -338,7 +338,7 @@ def handle_admin_message(vk, event):
             store.orders[order_id]["price"] = price_text
             payment_method = (store.orders[order_id].get("order") or {}).get("payment_method")
         msg_lines = [f"✅ Заказ принят.\n💰 Стоимость: {price_text}₽"]
-        if payment_method == "Предоплата переводом":
+        if payment_method == "Переводом сейчас":
             msg_lines.append("")
             msg_lines.extend(core.PAYMENT_REQUEST_LINES)
             u = core.get_user_state(client_id)
@@ -347,7 +347,7 @@ def handle_admin_message(vk, event):
             if order_id in store.orders:
                 store.orders[order_id]["status"] = "WAITING_FOR_CHECK"
         core.send_message(vk, client_id, "\n".join(msg_lines))
-        core.send_message(vk, core.ADMIN_ID, "Цена отправлена, оплата запрошена (если перевод).", keyboard=kbd.create_admin_menu_keyboard())
+        core.send_message(vk, user_id, "Цена отправлена, оплата запрошена (если перевод сейчас).", keyboard=kbd.create_admin_menu_keyboard())
         store.admin_states.pop(user_id, None)
         return True
 
