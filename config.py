@@ -27,7 +27,12 @@ class Settings(BaseSettings):
     VK_ADMIN_ID: int = Field(
         ...,
         validation_alias=AliasChoices("VK_ADMIN_ID", "ADMIN_ID"),
-        description="ID администратора.",
+        description="ID администратора (основной).",
+    )
+    VK_ADMIN_IDS: str = Field(
+        default="",
+        validation_alias=AliasChoices("VK_ADMIN_IDS", "ADMIN_IDS"),
+        description="ID администраторов через запятую (например: 123,456,789). Если пусто — используется VK_ADMIN_ID.",
     )
 
     # Реквизиты для перевода (предоплата переводом)
