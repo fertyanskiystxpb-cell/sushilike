@@ -17,3 +17,4 @@ next_order_id: int = 1
 # Флаг приёма заявок админом.
 accepting_orders_enabled: bool = True
 accepting_orders_reason: str = ""
+

@@ -29,8 +29,9 @@ def create_main_menu_keyboard() -> VkKeyboard:
 
 
 def create_main_menu_keyboard_for_user(user_id: int) -> VkKeyboard:
+    from bot import core
     keyboard = create_main_menu_keyboard()
-    if user_id == settings.VK_ADMIN_ID:
+    if user_id in core.ADMIN_IDS:
         keyboard.add_line()
         keyboard.add_button(ADMIN_MENU_TEXT, color=VkKeyboardColor.PRIMARY)
     return keyboard
@@ -63,8 +64,18 @@ def create_yes_no_keyboard() -> VkKeyboard:
 
 def create_payment_keyboard() -> VkKeyboard:
     keyboard = VkKeyboard(one_time=True, inline=False)
-    keyboard.add_button("Оплата при получении", color=VkKeyboardColor.PRIMARY)
-    keyboard.add_button("Предоплата переводом", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Наличными", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_button("Переводом", color=VkKeyboardColor.PRIMARY)
+    keyboard.add_line()
+    keyboard.add_button(BACK_TEXT, color=VkKeyboardColor.SECONDARY)
+    keyboard.add_button(CANCEL_ORDER_TEXT, color=VkKeyboardColor.NEGATIVE)
+    return keyboard
+
+
+def create_payment_transfer_timing_keyboard() -> VkKeyboard:
+    keyboard = VkKeyboard(one_time=True, inline=False)
+    keyboard.add_button("Сейчас", color=VkKeyboardColor.POSITIVE)
+    keyboard.add_button("При получении", color=VkKeyboardColor.PRIMARY)
     keyboard.add_line()
     keyboard.add_button(BACK_TEXT, color=VkKeyboardColor.SECONDARY)
     keyboard.add_button(CANCEL_ORDER_TEXT, color=VkKeyboardColor.NEGATIVE)
@@ -149,7 +160,7 @@ def create_admin_processing_keyboard(order_id: int, client_id: int, payment_meth
         payload={"type": "ADMIN_ACTION", "action": "REPLY_TEMPLATE", "template": "WAIT_1_5_2", "order_id": order_id, "client_id": client_id},
     )
     keyboard.add_line()
-    if payment_method == "Оплата при получении":
+    if payment_method in ("Наличными", "Переводом при получении"):
         keyboard.add_button(
             "💵 Оплата получена",
             color=VkKeyboardColor.POSITIVE,

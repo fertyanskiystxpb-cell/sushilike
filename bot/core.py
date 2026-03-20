@@ -15,15 +15,26 @@ from bot.states import (
     STATE_SET_ADDRESS,
     STATE_SET_PHONE,
     STATE_SET_PAYMENT_METHOD,
-    STATE_SET_CASH_CHANGE,
+    STATE_SET_PAYMENT_TRANSFER_TIMING,
     STATE_CONFIRM_ORDER,
     STATE_PREORDER_CONFIRM,
-    STATE_SET_ORDER_TIME,
 )
 from bot import keyboards as kbd
 
 
-ADMIN_ID = settings.VK_ADMIN_ID
+def get_admin_ids():
+    """Список ID администраторов."""
+    ids_str = getattr(settings, "VK_ADMIN_IDS", "") or ""
+    if ids_str.strip():
+        try:
+            return [int(x.strip()) for x in ids_str.split(",") if x.strip()]
+        except (ValueError, AttributeError):
+            pass
+    return [settings.VK_ADMIN_ID]
+
+
+ADMIN_IDS = get_admin_ids()
+ADMIN_ID = ADMIN_IDS[0] if ADMIN_IDS else settings.VK_ADMIN_ID
 
 TRANSFER_INFO_LINES = [
     f"💳 Перевод: {settings.PAYMENT_BANK}",
@@ -88,23 +99,28 @@ def send_message(vk, user_id, text, keyboard=None):
 
 
 def edit_admin_order_message(vk, order_id, text, keyboard):
-    """Редактировать сообщение админа с заказом."""
+    """Редактировать сообщение админа с заказом (у всех админов, кому оно было отправлено)."""
     entry = store.orders.get(order_id)
     if not entry:
         return False
-    msg_id = entry.get("admin_message_id")
-    if not msg_id:
+    admin_msgs = entry.get("admin_message_ids") or {}
+    if not admin_msgs and entry.get("admin_message_id"):
+        admin_msgs = {ADMIN_ID: entry["admin_message_id"]}
+    if not admin_msgs:
         return False
-    try:
-        vk.messages.edit(
-            peer_id=ADMIN_ID,
-            message_id=msg_id,
-            message=text,
-            keyboard=keyboard.get_keyboard() if keyboard else None,
-        )
-        return True
-    except Exception:
-        return False
+    ok = False
+    for aid, msg_id in admin_msgs.items():
+        try:
+            vk.messages.edit(
+                peer_id=aid,
+                message_id=msg_id,
+                message=text,
+                keyboard=keyboard.get_keyboard() if keyboard else None,
+            )
+            ok = True
+        except Exception:
+            pass
+    return ok
 
 
 def build_order_summary(order_data):
@@ -113,14 +129,11 @@ def build_order_summary(order_data):
         "🧾 Ваш заказ:",
         f"— Заказ: {order_data.get('food')}",
         f"— Приборы: {order_data.get('cutlery')}",
-        f"— Доп. набор (имбирь/васаби): {order_data.get('extra_set')}",
-        f"— Время заказа: {order_data.get('delivery_time')}",
+        f"— Доп. (имбирь/васаби): {order_data.get('extra_set', '—')}",
         f"— Адрес доставки: {order_data.get('address')}",
         f"— Телефон: {order_data.get('phone')}",
         f"— Оплата: {order_data.get('payment_method')}",
     ]
-    if order_data.get("payment_method") == "Оплата при получении" and order_data.get("cash_change"):
-        lines.append(f"— Сдача: {order_data.get('cash_change')}")
     if order_data.get("is_preorder"):
         lines.append("— Флаг: ПРЕДЗАКАЗ")
     return "\n".join(lines)
@@ -159,15 +172,7 @@ def prompt_for_state(vk, user_id, state):
         send_message(
             vk,
             user_id,
-            "Что вы хотите заказать?\nНапишите, пожалуйста, название.",
-            keyboard=kbd.create_order_nav_keyboard(),
-        )
-        return
-    if state == STATE_SET_ORDER_TIME:
-        send_message(
-            vk,
-            user_id,
-            "Во сколько нужен заказ?",
+            "Что будете заказывать?",
             keyboard=kbd.create_order_nav_keyboard(),
         )
         return
@@ -183,7 +188,7 @@ def prompt_for_state(vk, user_id, state):
         send_message(
             vk,
             user_id,
-            "Приборы свыше 4-х штук платные (10₽/шт). Сколько всего приборов вам нужно? (Введите число)",
+            "Сколько всего приборов вам нужно?",
             keyboard=kbd.create_order_nav_keyboard(),
         )
         return
@@ -191,8 +196,8 @@ def prompt_for_state(vk, user_id, state):
         send_message(
             vk,
             user_id,
-            "Имбирь, васаби и соевый соус не входят в стоимость. Общий доп набор рассчитан на 3-4 человека, стоит 100₽. Будете брать?",
-            keyboard=kbd.create_yes_no_keyboard(),
+            "Имбирь и васаби не входят в стоимость. Можно заказать отдельно: имбирь — 40₽, васаби — 40₽. Напишите, что нужно (например: имбирь, васаби, оба или нет)",
+            keyboard=kbd.create_order_nav_keyboard(),
         )
         return
     if state == STATE_SET_ADDRESS:
@@ -210,12 +215,12 @@ def prompt_for_state(vk, user_id, state):
     if state == STATE_SET_PAYMENT_METHOD:
         send_message(vk, user_id, "Выберите способ оплаты:", keyboard=kbd.create_payment_keyboard())
         return
-    if state == STATE_SET_CASH_CHANGE:
+    if state == STATE_SET_PAYMENT_TRANSFER_TIMING:
         send_message(
             vk,
             user_id,
-            "От какой суммы потребуется сдача?",
-            keyboard=kbd.create_order_nav_keyboard(),
+            "Оплатить сейчас или при получении?",
+            keyboard=kbd.create_payment_transfer_timing_keyboard(),
         )
         return
     if state == STATE_PREORDER_CONFIRM:
@@ -260,7 +265,7 @@ def handle_start_or_menu(vk, user_id):
     send_message(
         vk,
         user_id,
-        f"{greeting}, {name}! ✨\n\nДобро пожаловать в Суши Лайк — место, где каждый ролл заслуживает твоего сердечка! 🍣❤️\n\nГотовим из-под ножа, везем быстро, кормим вкусно.\n\nЧто делаем дальше? 👇",
+        f"{greeting}, {name}! ✨\n\nДобро пожаловать в Суши Лайк — место, где каждый ролл заслуживает твоего сердечка! 🍣❤️\n\nДоставка со вкусом.\n\nЧто делаем дальше? 👇",
         keyboard=kbd.create_main_menu_keyboard_for_user(user_id),
     )
 
@@ -292,15 +297,28 @@ def register_and_send_order_to_admin(vk, user_id, order_data):
         preorder_flag = ""
     text = f"📩 Новый заказ #{order_id} от пользователя ID {user_id}:\n\n{summary}{preorder_flag}"
     keyboard = kbd.create_admin_new_order_keyboard(order_id=order_id, client_id=user_id)
+    kbd_json = keyboard.get_keyboard()
 
-    msg_id = vk.messages.send(
-        user_id=ADMIN_ID,
-        message=text,
-        random_id=0,
-        keyboard=keyboard.get_keyboard(),
-    )
-    store.orders[order_id]["admin_message_id"] = msg_id
-    send_message(vk, ADMIN_ID, "Меню администратора.", keyboard=kbd.create_admin_menu_keyboard())
+    admin_message_ids = {}
+    for aid in ADMIN_IDS:
+        try:
+            msg_id = vk.messages.send(
+                user_id=aid,
+                message=text,
+                random_id=0,
+                keyboard=kbd_json,
+            )
+            admin_message_ids[aid] = msg_id
+        except Exception:
+            pass
+    store.orders[order_id]["admin_message_ids"] = admin_message_ids
+    if not admin_message_ids and ADMIN_IDS:
+        store.orders[order_id]["admin_message_id"] = None
+    for aid in ADMIN_IDS:
+        try:
+            send_message(vk, aid, "Меню администратора.", keyboard=kbd.create_admin_menu_keyboard())
+        except Exception:
+            pass
 
 
 def get_daily_stats():
