@@ -95,19 +95,17 @@ def handle_user_message(vk, user_id, text, payload, attachments, message_id):
         return
 
     if state == STATE_SET_EXTRA_SET:
-        raw = (text or "").strip().lower()
-        if not raw:
-            order["extra_set"] = "нет"
-        elif raw in ("нет", "не надо", "не нужен", "ничего", "—", "-"):
-            order["extra_set"] = "нет"
-        elif raw in ("имбирь", "ginger"):
-            order["extra_set"] = "имбирь (40₽)"
-        elif raw in ("васаби", "wasabi"):
-            order["extra_set"] = "васаби (40₽)"
-        elif raw in ("оба", "обаа", "оба варианта", "имбирь и васаби", "имбирь, васаби"):
-            order["extra_set"] = "имбирь + васаби (80₽)"
-        else:
-            order["extra_set"] = text.strip()
+        if not (text or "").strip():
+            core.send_message(
+                vk,
+                user_id,
+                "Введите доп набор текстом (например: васаби, имбирь, оба или нет).",
+                keyboard=kbd.create_order_nav_keyboard(),
+            )
+            return
+
+        # Сохраняем ввод клиента ровно как он написал.
+        order["extra_set"] = text.strip()
         core.push_history(state_info, STATE_SET_EXTRA_SET)
         state_info["state"] = STATE_SET_ADDRESS
         core.prompt_for_state(vk, user_id, STATE_SET_ADDRESS)
@@ -158,7 +156,7 @@ def _handle_waiting_for_check(vk, user_id, text, attachments, message_id, state_
                     order_id = oid
                     break
         if not order_id:
-            core.send_message(vk, user_id, "Не найден заказ для прикрепления чека. Обратитесь к администратору.")
+            core.send_message(vk, user_id, "Не найден заказ для прикрепления чека. Обратитесь к оператору.")
             return
         name = ""
         try:
@@ -178,7 +176,7 @@ def _handle_waiting_for_check(vk, user_id, text, attachments, message_id, state_
                 )
             except Exception:
                 pass
-        core.send_message(vk, user_id, "✅ Чек получен. Ожидайте подтверждения оплаты администратором.")
+        core.send_message(vk, user_id, "✅ Чек получен. Ожидайте подтверждения оплаты оператором.")
     else:
         core.send_message(vk, user_id, "Пожалуйста, пришлите скриншот чека (фото/документ).")
 
@@ -217,14 +215,14 @@ def _handle_idle(vk, user_id, text, state_info, now_t):
         core.send_message(
             vk,
             user_id,
-            "Напишите ваше сообщение администратору. Я перешлю его.\n"
+            "Напишите ваше сообщение оператору. Я перешлю его.\n"
             "Чтобы отменить — нажмите «🏠 В главное меню».",
             keyboard=kbd.create_contact_admin_keyboard(),
         )
         return
 
     if text == ADMIN_MENU_TEXT and user_id in core.ADMIN_IDS:
-        core.send_message(vk, core.ADMIN_ID, "Меню администратора.", keyboard=kbd.create_admin_menu_keyboard())
+        core.send_message(vk, core.ADMIN_ID, "Меню оператора.", keyboard=kbd.create_admin_menu_keyboard())
         return
 
     core.handle_start_or_menu(vk, user_id)
@@ -239,7 +237,7 @@ def _handle_contact_admin(vk, user_id, text):
             core.send_message(
                 vk,
                 aid,
-                f"👨‍💬 Обращение к администратору от пользователя ID {user_id}:\n\n{text}",
+                f"👨‍💬 Обращение к оператору от пользователя ID {user_id}:\n\n{text}",
                 keyboard=kbd.create_admin_menu_keyboard(),
             )
         except Exception:
@@ -247,7 +245,7 @@ def _handle_contact_admin(vk, user_id, text):
     core.send_message(
         vk,
         user_id,
-        "Сообщение отправлено администратору. Ожидайте ответа.",
+        "Сообщение отправлено оператору. Ожидайте ответа.",
         keyboard=kbd.create_main_menu_keyboard_for_user(user_id),
     )
     core.reset_user_state(user_id)
@@ -274,18 +272,31 @@ def _handle_preorder_confirm(vk, user_id, text, state_info, order):
 
 
 def _handle_set_cutlery(vk, user_id, text, state_info, order):
-    if text in ("1", "2", "3", "4"):
-        order["cutlery"] = text
-        core.push_history(state_info, STATE_SET_CUTLERY)
-        state_info["state"] = STATE_SET_EXTRA_SET
-        core.prompt_for_state(vk, user_id, STATE_SET_EXTRA_SET)
+    try:
+        n = int((text or "").strip())
+    except ValueError:
+        core.send_message(
+            vk,
+            user_id,
+            "Какое количество приборов вам нужно? (палочек)",
+            keyboard=kbd.create_order_nav_keyboard(),
+        )
         return
-    if text == "5+":
-        core.push_history(state_info, STATE_SET_CUTLERY)
-        state_info["state"] = STATE_SET_CUTLERY_CUSTOM
-        core.prompt_for_state(vk, user_id, STATE_SET_CUTLERY_CUSTOM)
+
+    if n < 1 or n > 50:
+        core.send_message(
+            vk,
+            user_id,
+            "Введите число от 1 до 50.",
+            keyboard=kbd.create_order_nav_keyboard(),
+        )
         return
-    core.send_message(vk, user_id, "Пожалуйста, выберите количество приборов кнопкой.", keyboard=kbd.create_cutlery_keyboard())
+
+    # Упрощаем ввод: пользователь вводит число палочек текстом.
+    order["cutlery"] = str(n)
+    core.push_history(state_info, STATE_SET_CUTLERY)
+    state_info["state"] = STATE_SET_EXTRA_SET
+    core.prompt_for_state(vk, user_id, STATE_SET_EXTRA_SET)
 
 
 def _handle_set_payment_method(vk, user_id, text, state_info, order):
@@ -338,7 +349,7 @@ def _handle_confirm_order(vk, user_id, text, order):
         core.send_message(
             vk,
             user_id,
-            "Спасибо! Ваш заказ отправлен администратору.\nОжидайте сообщения о времени доставки 🙌",
+            "Спасибо! Ваш заказ отправлен оператору.\nОжидайте сообщения о времени доставки 🙌",
             keyboard=kbd.create_main_menu_keyboard_for_user(user_id),
         )
         return
