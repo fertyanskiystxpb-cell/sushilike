@@ -22,6 +22,6 @@ BACK_TEXT = "⬅ Назад"
 CANCEL_ORDER_TEXT = "❌ Отменить заказ"
 MENU_TEXT = "🏠 В главное меню"
 CONTACT_ADMIN_TEXT = "👨‍💬 Задать вопрос"
-ADMIN_MENU_TEXT = "🛠 Меню администратора"
+ADMIN_MENU_TEXT = "🛠 Меню оператора"
 ADMIN_TO_USER_MENU_TEXT = "👤 Обычное меню"
 

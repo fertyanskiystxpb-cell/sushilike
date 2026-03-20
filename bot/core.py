@@ -23,7 +23,7 @@ from bot import keyboards as kbd
 
 
 def get_admin_ids():
-    """Список ID администраторов."""
+    """Список ID операторов."""
     ids_str = getattr(settings, "VK_ADMIN_IDS", "") or ""
     if ids_str.strip():
         try:
@@ -129,7 +129,7 @@ def build_order_summary(order_data):
         "🧾 Ваш заказ:",
         f"— Заказ: {order_data.get('food')}",
         f"— Приборы: {order_data.get('cutlery')}",
-        f"— Доп. (имбирь/васаби): {order_data.get('extra_set', '—')}",
+        f"— Доп. набор: {order_data.get('extra_set', '—')}",
         f"— Адрес доставки: {order_data.get('address')}",
         f"— Телефон: {order_data.get('phone')}",
         f"— Оплата: {order_data.get('payment_method')}",
@@ -172,7 +172,7 @@ def prompt_for_state(vk, user_id, state):
         send_message(
             vk,
             user_id,
-            "Что будете заказывать?",
+            "Что будете заказывать?\n Укажите название или номер.",
             keyboard=kbd.create_order_nav_keyboard(),
         )
         return
@@ -181,7 +181,7 @@ def prompt_for_state(vk, user_id, state):
             vk,
             user_id,
             "Сколько приборов (палочек) положить?",
-            keyboard=kbd.create_cutlery_keyboard(),
+            keyboard=kbd.create_order_nav_keyboard(),
         )
         return
     if state == STATE_SET_CUTLERY_CUSTOM:
@@ -196,7 +196,7 @@ def prompt_for_state(vk, user_id, state):
         send_message(
             vk,
             user_id,
-            "Имбирь и васаби не входят в стоимость. Можно заказать отдельно: имбирь — 40₽, васаби — 40₽. Напишите, что нужно (например: имбирь, васаби, оба или нет)",
+            "Имбирь, васаби и соевый соус не входят в стоимость. Общий доп набор рассчитан на 3-4 человека, стоит 100₽. Будете брать?",
             keyboard=kbd.create_order_nav_keyboard(),
         )
         return
@@ -230,7 +230,7 @@ def prompt_for_state(vk, user_id, state):
         if now_t < start_today:
             question = "Мы еще не работаем, оформить предзаказ на сегодня?"
         else:
-            question = "Мы уже закрыты, оформить предзаказ на завтра?"
+            question = "Мы уже закрыты, оформить предзаказ на другой день?"
         send_message(vk, user_id, question, keyboard=kbd.create_preorder_keyboard())
         return
     if state == STATE_CONFIRM_ORDER:
@@ -316,7 +316,7 @@ def register_and_send_order_to_admin(vk, user_id, order_data):
         store.orders[order_id]["admin_message_id"] = None
     for aid in ADMIN_IDS:
         try:
-            send_message(vk, aid, "Меню администратора.", keyboard=kbd.create_admin_menu_keyboard())
+            send_message(vk, aid, "Меню оператора.", keyboard=kbd.create_admin_menu_keyboard())
         except Exception:
             pass
 

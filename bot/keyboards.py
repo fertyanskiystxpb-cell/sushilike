@@ -20,6 +20,8 @@ def create_main_menu_keyboard() -> VkKeyboard:
     keyboard = VkKeyboard(one_time=False, inline=False)
     keyboard.add_button("🛍 Сделать заказ", color=VkKeyboardColor.POSITIVE)
     keyboard.add_line()
+    keyboard.add_openlink_button("📋 Наше меню", "https://vk.com/market-175111431")
+    keyboard.add_line()
     keyboard.add_openlink_button("🎁 Акции", settings.GROUP_WALL_URL)
     keyboard.add_line()
     keyboard.add_button("📍 Адрес", color=VkKeyboardColor.SECONDARY)
