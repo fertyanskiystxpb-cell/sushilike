@@ -18,12 +18,13 @@ from bot.states import (
     STATE_SET_PAYMENT_TRANSFER_TIMING,
     STATE_CONFIRM_ORDER,
     STATE_PREORDER_CONFIRM,
+    STATE_SET_ORDER_TIME,
 )
 from bot import keyboards as kbd
 
 
 def get_admin_ids():
-    """Список ID операторов."""
+    """Список ID операторов из конфига (.env), без учёта БД."""
     ids_str = getattr(settings, "VK_ADMIN_IDS", "") or ""
     if ids_str.strip():
         try:
@@ -33,11 +34,27 @@ def get_admin_ids():
     return [settings.VK_ADMIN_ID]
 
 
-ADMIN_IDS = get_admin_ids()
-ADMIN_ID = ADMIN_IDS[0] if ADMIN_IDS else settings.VK_ADMIN_ID
+def get_operator_ids():
+    """Актуальный список операторов: из SQLite (employees), иначе из конфига."""
+    if getattr(settings, "DB_ENABLED", False):
+        try:
+            from database.models import list_employee_ids
+
+            ids = list_employee_ids()
+            if ids:
+                return ids
+        except Exception:
+            pass
+    return get_admin_ids()
+
+
+def get_admin_id():
+    """Первый ID из списка операторов для обратной совместимости."""
+    ids = get_operator_ids()
+    return ids[0] if ids else settings.VK_ADMIN_ID
 
 TRANSFER_INFO_LINES = [
-    f"💳 Перевод: {settings.PAYMENT_BANK}",
+    f"💳 Перевод: Т-банк/Сбербанк",
     f"Номер: {settings.PAYMENT_ACCOUNT_NUMBER}",
     f"Получатель: {settings.PAYMENT_RECEIVER_NAME}",
 ]
@@ -45,13 +62,73 @@ TRANSFER_INFO_LINES = [
 PAYMENT_REQUEST_LINES = [
     "💳 Оплата переводом:",
     f"Номер: {settings.PAYMENT_ACCOUNT_NUMBER}",
-    f"Банк: {settings.PAYMENT_BANK}",
+    f"Банк: Т-банк/Сбербанк",
     f"Получатель: {settings.PAYMENT_RECEIVER_NAME}",
     "",
     "Пожалуйста, пришлите скриншот чека в ответ на это сообщение.",
 ]
 
+# Только просьба о чеке (реквизиты уже отправлены при оформлении заказа).
+PAYMENT_CHECK_ONLY_LINES = [
+    "Пожалуйста, пришлите скриншот чека в ответ на это сообщение (фото или документ).",
+]
+
 ORDER_END_TIME = time(21, 0)
+
+
+def GetTimeBasedGreeting():
+    t = now_utc5().time()
+    if time(0, 0) <= t < time(6, 0):
+        return "Доброй ночи"
+    if time(6, 0) <= t < time(12, 0):
+        return "Доброе утро"
+    if time(12, 0) <= t < time(18, 0):
+        return "Добрый день"
+    return "Добрый вечер"
+
+
+def get_order_thanks_closing():
+    """Фраза благодарности в конце сообщения при принятии заказа (по времени суток)."""
+    t = now_utc5().time()
+    if time(0, 0) <= t < time(6, 0):
+        return "Спасибо за заказ, хорошей вам ночи! 😊"
+    if time(6, 0) <= t < time(18, 0):
+        return "Спасибо за заказ, хорошего вам дня! 😊"
+    return "Спасибо за заказ, хорошего вам вечера! 😊"
+
+
+def parse_price_to_int(price_val):
+    """Извлечь целую сумму из строки цены (например «1 490₽» → 1490)."""
+    if price_val is None:
+        return None
+    try:
+        n = int(re.sub(r"\D", "", str(price_val)))
+        return n if n > 0 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def build_client_order_placed_message(order_data):
+    """
+    Сообщение клиенту сразу после подтверждения заказа: всегда реквизиты.
+    Просьба прислать чек — только при оплате «Переводом сейчас».
+    """
+    pm = (order_data or {}).get("payment_method") or ""
+    lines = [
+        "Спасибо! Ваш заказ отправлен оператору.\nОжидайте сообщения о сумме и времени ожидания 🙌",
+        "",
+        "💳 Реквизиты для оплаты:",
+        *TRANSFER_INFO_LINES,
+    ]
+    if pm == "Переводом сейчас":
+        lines.extend(
+            [
+                "",
+                "После того как оператор укажет сумму заказа, переведите оплату по реквизитам выше "
+                "и пришлите сюда скриншот чека (фото или документ).",
+            ]
+        )
+    return "\n".join(lines)
 
 
 def now_utc5():
@@ -98,6 +175,27 @@ def send_message(vk, user_id, text, keyboard=None):
     )
 
 
+def get_user_full_name(vk, user_id):
+    """Вернуть имя и фамилию пользователя VK."""
+    try:
+        info = vk.users.get(user_ids=user_id)
+        if info:
+            first_name = (info[0].get("first_name") or "").strip()
+            last_name = (info[0].get("last_name") or "").strip()
+            full_name = f"{first_name} {last_name}".strip()
+            if full_name:
+                return full_name
+    except Exception:
+        pass
+    return f"ID {user_id}"
+
+
+def format_user_mention(vk, user_id):
+    """Вернуть кликабельное имя пользователя в формате VK."""
+    full_name = get_user_full_name(vk, user_id)
+    return f"[id{user_id}|{full_name}]"
+
+
 def edit_admin_order_message(vk, order_id, text, keyboard):
     """Редактировать сообщение админа с заказом (у всех админов, кому оно было отправлено)."""
     entry = store.orders.get(order_id)
@@ -105,7 +203,9 @@ def edit_admin_order_message(vk, order_id, text, keyboard):
         return False
     admin_msgs = entry.get("admin_message_ids") or {}
     if not admin_msgs and entry.get("admin_message_id"):
-        admin_msgs = {ADMIN_ID: entry["admin_message_id"]}
+        fallback = get_operator_ids()
+        aid0 = fallback[0] if fallback else get_admin_id()
+        admin_msgs = {aid0: entry["admin_message_id"]}
     if not admin_msgs:
         return False
     ok = False
@@ -133,6 +233,7 @@ def build_order_summary(order_data):
         f"— Адрес доставки: {order_data.get('address')}",
         f"— Телефон: {order_data.get('phone')}",
         f"— Оплата: {order_data.get('payment_method')}",
+        f"— Комментарий к заказу: {order_data.get('order_time', '—')}",
     ]
     if order_data.get("is_preorder"):
         lines.append("— Флаг: ПРЕДЗАКАЗ")
@@ -223,14 +324,22 @@ def prompt_for_state(vk, user_id, state):
             keyboard=kbd.create_payment_transfer_timing_keyboard(),
         )
         return
+    if state == STATE_SET_ORDER_TIME:
+        send_message(
+            vk,
+            user_id,
+            "Комментарий к заказу.",
+            keyboard=kbd.create_order_nav_keyboard(),
+        )
+        return
     if state == STATE_PREORDER_CONFIRM:
         now_dt = now_utc5()
         start_today = order_start_time_for_date(now_dt.date())
         now_t = now_dt.time()
         if now_t < start_today:
-            question = "Мы еще не работаем, оформить предзаказ на сегодня?"
+            question = "Мы еще не не открылись, хотите оформить предзаказ?"
         else:
-            question = "Мы уже закрыты, оформить предзаказ на другой день?"
+            question = "Мы уже закрыты, хотите оформить предзаказ?"
         send_message(vk, user_id, question, keyboard=kbd.create_preorder_keyboard())
         return
     if state == STATE_CONFIRM_ORDER:
@@ -248,13 +357,7 @@ def prompt_for_state(vk, user_id, state):
 def handle_start_or_menu(vk, user_id):
     """Показать главное меню пользователю."""
     reset_user_state(user_id)
-    now = now_utc5().time()
-    if now < time(12, 0):
-        greeting = "Доброе утро"
-    elif now < time(18, 0):
-        greeting = "Доброго дня"
-    else:
-        greeting = "Доброго вечера"
+    greeting = GetTimeBasedGreeting()
     name = ""
     try:
         info = vk.users.get(user_ids=user_id)
@@ -270,6 +373,29 @@ def handle_start_or_menu(vk, user_id):
     )
 
 
+def sync_order_to_db(order_id: int) -> None:
+    """Записать в SQLite текущее состояние заказа из памяти."""
+    if not getattr(settings, "DB_ENABLED", False):
+        return
+    entry = store.orders.get(order_id)
+    if not entry:
+        return
+    try:
+        from database.models import update_order_record
+
+        update_order_record(
+            order_id,
+            user_id=int(entry["client_id"]),
+            payload=dict(entry.get("order") or {}),
+            status=str(entry.get("status") or "NEW"),
+            price=entry.get("price"),
+            gift=entry.get("gift"),
+            business_date=entry.get("created_at"),
+        )
+    except Exception as e:
+        print(f"[DB] sync_order_to_db error: {e}")
+
+
 def register_and_send_order_to_admin(vk, user_id, order_data):
     """Регистрирует заказ и отправляет админу."""
     from database.models import save_order_stub
@@ -277,30 +403,39 @@ def register_and_send_order_to_admin(vk, user_id, order_data):
     summary = build_order_summary(order_data)
     order_id = store.next_order_id
     store.next_order_id += 1
+    business_date = now_utc5().date().isoformat()
     store.orders[order_id] = {
         "client_id": user_id,
         "order": dict(order_data),
         "summary": summary,
         "status": "NEW",
         "price": None,
+        "gift": None,
         "admin_message_id": None,
-        "created_at": now_utc5().date().isoformat(),
+        "created_at": business_date,
     }
     try:
-        save_order_stub(order_id=order_id, user_id=user_id, payload=dict(order_data), status="NEW")
+        save_order_stub(
+            order_id=order_id,
+            user_id=user_id,
+            payload=dict(order_data),
+            status="NEW",
+            business_date=business_date,
+        )
     except Exception as e:
         print(f"[DB_STUB] save_order_stub error: {e}")
 
     if order_data.get("is_preorder"):
-        preorder_flag = "\n\n🗓 ПРЕДЗАКАЗ (на сегодня)" if order_data.get("preorder_same_day") else "\n\n🗓 ПРЕДЗАКАЗ (на завтра)"
+        preorder_flag = "\n\n🗓 ПРЕДЗАКАЗ" if order_data.get("preorder_same_day") else "\n\n🗓 ПРЕДЗАКАЗ (на завтра)"
     else:
         preorder_flag = ""
-    text = f"📩 Новый заказ #{order_id} от пользователя ID {user_id}:\n\n{summary}{preorder_flag}"
+    client_mention = format_user_mention(vk, user_id)
+    text = f"📩 Новый заказ #{order_id} от клиента {client_mention}:\n\n{summary}{preorder_flag}"
     keyboard = kbd.create_admin_new_order_keyboard(order_id=order_id, client_id=user_id)
     kbd_json = keyboard.get_keyboard()
 
     admin_message_ids = {}
-    for aid in ADMIN_IDS:
+    for aid in get_operator_ids():
         try:
             msg_id = vk.messages.send(
                 user_id=aid,
@@ -312,18 +447,33 @@ def register_and_send_order_to_admin(vk, user_id, order_data):
         except Exception:
             pass
     store.orders[order_id]["admin_message_ids"] = admin_message_ids
-    if not admin_message_ids and ADMIN_IDS:
+    if not admin_message_ids and get_operator_ids():
         store.orders[order_id]["admin_message_id"] = None
-    for aid in ADMIN_IDS:
+    for aid in get_operator_ids():
         try:
             send_message(vk, aid, "Меню оператора.", keyboard=kbd.create_admin_menu_keyboard())
         except Exception:
             pass
 
+    # Сразу после оформления — реквизиты всем; просьба о чеке только при «Переводом сейчас».
+    send_message(
+        vk,
+        user_id,
+        build_client_order_placed_message(order_data),
+        keyboard=kbd.create_main_menu_keyboard_for_user(user_id),
+    )
+
 
 def get_daily_stats():
-    """Статистика заказов за сегодня: (новых, принято, отказано, сумма оплаченных)."""
+    """Статистика заказов за сегодня: (новых, принято, отказано, сумма оплаченных). Сброс по календарной дате UTC+5."""
     today = now_utc5().date().isoformat()
+    if getattr(settings, "DB_ENABLED", False):
+        try:
+            from database.models import fetch_daily_stats
+
+            return fetch_daily_stats(today)
+        except Exception:
+            pass
     new_count = 0
     accepted = 0
     cancelled = 0

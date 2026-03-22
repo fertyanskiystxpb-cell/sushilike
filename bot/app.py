@@ -25,7 +25,7 @@ def handle_event(vk, event):
     attachments = event.obj.message.get("attachments", [])
     message_id = event.obj.message.get("id")
 
-    if user_id in core.ADMIN_IDS:
+    if user_id in core.get_operator_ids():
         if admin_handlers.handle_admin_flow(vk, user_id, text, payload, event):
             return
 
