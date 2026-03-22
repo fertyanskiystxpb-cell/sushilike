@@ -1,6 +1,8 @@
 """
 Обработка сообщений пользователей (FSM оформления заказа).
 """
+import json
+
 from config import settings
 from bot import store
 from bot import core
@@ -29,11 +31,35 @@ from bot.states import (
 from bot.services.promos_service import read_promos_text
 
 
+def _parse_client_payload(payload):
+    if not payload:
+        return None
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except Exception:
+            return None
+    return None
+
+
 def handle_user_message(vk, user_id, text, payload, attachments, message_id):
     """Главный обработчик сообщений от обычных пользователей (не админа)."""
     state_info = core.get_user_state(user_id)
     state = state_info["state"]
     order = state_info["order"]
+
+    payload_data = _parse_client_payload(payload)
+    if payload_data and payload_data.get("type") == "CLIENT_ACTION" and payload_data.get("action") == "REPLY_TO_ADMIN":
+        state_info["state"] = STATE_CONTACT_ADMIN
+        core.send_message(
+            vk,
+            user_id,
+            "Напишите ваше сообщение оператору. Я перешлю его.\nЧтобы отменить — нажмите «🏠 В главное меню».",
+            keyboard=kbd.create_contact_admin_keyboard(),
+        )
+        return
 
     if state == STATE_WAITING_FOR_CHECK:
         return _handle_waiting_for_check(vk, user_id, text, attachments, message_id, state_info)
@@ -140,6 +166,10 @@ def handle_user_message(vk, user_id, text, payload, attachments, message_id):
         _handle_set_payment_transfer_timing(vk, user_id, text, state_info, order)
         return
 
+    if state == STATE_SET_ORDER_TIME:
+        _handle_set_order_time(vk, user_id, text, state_info, order)
+        return
+
     if state == STATE_CONFIRM_ORDER:
         _handle_confirm_order(vk, user_id, text, order)
         return
@@ -158,18 +188,12 @@ def _handle_waiting_for_check(vk, user_id, text, attachments, message_id, state_
         if not order_id:
             core.send_message(vk, user_id, "Не найден заказ для прикрепления чека. Обратитесь к оператору.")
             return
-        name = ""
-        try:
-            info = vk.users.get(user_ids=user_id)
-            if info:
-                name = info[0].get("first_name", "")
-        except Exception:
-            pass
-        for aid in core.ADMIN_IDS:
+        client_mention = core.format_user_mention(vk, user_id)
+        for aid in core.get_operator_ids():
             try:
                 vk.messages.send(
                     user_id=aid,
-                    message=f"Поступил скриншот оплаты по заказу #{order_id} от клиента {name} (ID {user_id})",
+                    message=f"Поступил скриншот оплаты по заказу #{order_id} от клиента {client_mention}",
                     random_id=0,
                     forward_messages=message_id,
                     keyboard=kbd.create_admin_check_confirm_keyboard(order_id, user_id).get_keyboard(),
@@ -210,7 +234,7 @@ def _handle_idle(vk, user_id, text, state_info, now_t):
         core.send_message(vk, user_id, f"📍 Мы находимся по адресу:\n{settings.ORDER_ADDRESS_TEXT}")
         return
 
-    if text == CONTACT_ADMIN_TEXT:
+    if text in (CONTACT_ADMIN_TEXT, "Ответить", "↩ Ответить"):
         state_info["state"] = STATE_CONTACT_ADMIN
         core.send_message(
             vk,
@@ -221,8 +245,8 @@ def _handle_idle(vk, user_id, text, state_info, now_t):
         )
         return
 
-    if text == ADMIN_MENU_TEXT and user_id in core.ADMIN_IDS:
-        core.send_message(vk, core.ADMIN_ID, "Меню оператора.", keyboard=kbd.create_admin_menu_keyboard())
+    if text == ADMIN_MENU_TEXT and user_id in core.get_operator_ids():
+        core.send_message(vk, core.get_admin_id(), "Меню оператора.", keyboard=kbd.create_admin_menu_keyboard())
         return
 
     core.handle_start_or_menu(vk, user_id)
@@ -232,13 +256,13 @@ def _handle_contact_admin(vk, user_id, text):
     if not text.strip():
         core.send_message(vk, user_id, "Напишите ваше сообщение.", keyboard=kbd.create_contact_admin_keyboard())
         return
-    for aid in core.ADMIN_IDS:
+    for aid in core.get_operator_ids():
         try:
             core.send_message(
                 vk,
                 aid,
-                f"👨‍💬 Обращение к оператору от пользователя ID {user_id}:\n\n{text}",
-                keyboard=kbd.create_admin_menu_keyboard(),
+                f"👨‍💬 Обращение к оператору от пользователя {core.format_user_mention(vk, user_id)}:\n\n{text}",
+                keyboard=kbd.create_admin_reply_keyboard(user_id),
             )
         except Exception:
             pass
@@ -311,8 +335,8 @@ def _handle_set_payment_method(vk, user_id, text, state_info, order):
     order["payment_method"] = text
     core.push_history(state_info, STATE_SET_PAYMENT_METHOD)
     if text == "Наличными":
-        state_info["state"] = STATE_CONFIRM_ORDER
-        core.prompt_for_state(vk, user_id, STATE_CONFIRM_ORDER)
+        state_info["state"] = STATE_SET_ORDER_TIME
+        core.prompt_for_state(vk, user_id, STATE_SET_ORDER_TIME)
         return
     if text == "Переводом":
         state_info["state"] = STATE_SET_PAYMENT_TRANSFER_TIMING
@@ -325,14 +349,14 @@ def _handle_set_payment_transfer_timing(vk, user_id, text, state_info, order):
     if "сейчас" in raw or raw == "сейчас":
         order["payment_method"] = "Переводом сейчас"
         core.push_history(state_info, STATE_SET_PAYMENT_TRANSFER_TIMING)
-        state_info["state"] = STATE_CONFIRM_ORDER
-        core.prompt_for_state(vk, user_id, STATE_CONFIRM_ORDER)
+        state_info["state"] = STATE_SET_ORDER_TIME
+        core.prompt_for_state(vk, user_id, STATE_SET_ORDER_TIME)
         return
     if "при получении" in raw or "получении" in raw or raw == "при получении":
         order["payment_method"] = "Переводом при получении"
         core.push_history(state_info, STATE_SET_PAYMENT_TRANSFER_TIMING)
-        state_info["state"] = STATE_CONFIRM_ORDER
-        core.prompt_for_state(vk, user_id, STATE_CONFIRM_ORDER)
+        state_info["state"] = STATE_SET_ORDER_TIME
+        core.prompt_for_state(vk, user_id, STATE_SET_ORDER_TIME)
         return
     core.send_message(
         vk,
@@ -342,16 +366,27 @@ def _handle_set_payment_transfer_timing(vk, user_id, text, state_info, order):
     )
 
 
+def _handle_set_order_time(vk, user_id, text, state_info, order):
+    order_time_text = (text or "").strip()
+    if not order_time_text:
+        core.send_message(
+            vk,
+            user_id,
+            "Комментарий к заказу:",
+            keyboard=kbd.create_order_nav_keyboard(),
+        )
+        return
+    order["order_time"] = order_time_text
+    core.push_history(state_info, STATE_SET_ORDER_TIME)
+    state_info["state"] = STATE_CONFIRM_ORDER
+    core.prompt_for_state(vk, user_id, STATE_CONFIRM_ORDER)
+
+
 def _handle_confirm_order(vk, user_id, text, order):
     if "подтверд" in text.lower():
         core.register_and_send_order_to_admin(vk, user_id, order)
         core.reset_user_state(user_id)
-        core.send_message(
-            vk,
-            user_id,
-            "Спасибо! Ваш заказ отправлен оператору.\nОжидайте сообщения о времени доставки 🙌",
-            keyboard=kbd.create_main_menu_keyboard_for_user(user_id),
-        )
+        # Текст с реквизитами уже отправлен в register_and_send_order_to_admin
         return
     if "отмен" in text.lower():
         core.cancel_order(vk, user_id)
