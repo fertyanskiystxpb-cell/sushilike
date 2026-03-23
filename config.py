@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     DB_ENABLED: bool = Field(default=False, description="Сохранять заказы в SQLite (по умолчанию False).")
     DB_PATH: str = Field(default="sushi_like.db", description="Путь к sqlite db файл (если DB_ENABLED=True).")
 
+    # Настройки приветствий
+    GREETING_MORNING: str = Field(default="Доброе утро", description="Приветствие утром (6:00-12:00).")
+    GREETING_DAY: str = Field(default="Добрый день", description="Приветствие днём (12:00-18:00).")
+    GREETING_EVENING: str = Field(default="Добрый вечер", description="Приветствие вечером (18:00-00:00).")
+    GREETING_NIGHT: str = Field(default="Доброй ночи", description="Приветствие ночью (00:00-6:00).")
+    GREETING_EXTRA: str = Field(default="", description="Дополнительный текст после приветствия.")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
