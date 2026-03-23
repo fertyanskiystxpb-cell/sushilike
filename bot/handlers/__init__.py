@@ -1,7 +1,7 @@
 """
 Message handlers for the bot.
 """
-from bot.handlers import user, admin
+from bot.handlers import user
 
-__all__ = ["user", "admin"]
+__all__ = ["user"]
 
