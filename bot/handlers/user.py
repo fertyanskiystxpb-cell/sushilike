@@ -447,10 +447,6 @@ def _handle_idle(vk, user_id, text, state_info, now_t):
 
     # Кнопка "Заказ" обрабатывается выше, здесь её не проверяем
 
-    if text == "🎁 Наши акции":
-        core.send_message(vk, user_id, "🎁 Наши акции: https://vk.com/wall-175111431_2701", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
-        return
-
     if text == "📍 Адрес для самовывоза":
         address_text = settings.ORDER_ADDRESS_TEXT.replace('\\n', '\n')
         core.send_message(vk, user_id, f"📍 Адрес для самовывоза:\n{address_text}")
