@@ -300,14 +300,25 @@ def handle_start_or_menu(vk, user_id):
     """Показать главное меню пользователю."""
     reset_user_state(user_id)
     
-    # Проверяем, нужно ли показывать приветствие (только раз в сутки)
-    from datetime import date
-    today = date.today()
+    # Проверяем, нужно ли показывать приветствие (раз в 12 часов)
+    from datetime import datetime, timedelta
+    now = now_utc5()
     show_greeting = True
     
     if user_id in store.user_last_message:
-        if store.user_last_message[user_id] == today:
-            show_greeting = False
+        last_msg_time = store.user_last_message[user_id]
+        if isinstance(last_msg_time, datetime):
+            # Если прошло меньше 12 часов с последнего сообщения, не показываем приветствие
+            if now - last_msg_time < timedelta(hours=12):
+                show_greeting = False
+        elif isinstance(last_msg_time, str):
+            # Обратная совместимость со старым форматом (дата)
+            try:
+                last_date = datetime.fromisoformat(last_msg_time).date()
+                if last_date == now.date():
+                    show_greeting = False
+            except:
+                pass
     
     if show_greeting:
         try:
@@ -336,6 +347,9 @@ def handle_start_or_menu(vk, user_id):
     else:
         # Если приветствие не нужно, просто отправляем меню
         send_message(vk, user_id, "Главное меню:", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
+    
+    # Обновляем время последнего сообщения
+    store.user_last_message[user_id] = now
 
 
 def sync_order_to_db(order_id: int) -> None:
