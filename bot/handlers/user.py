@@ -272,6 +272,10 @@ def _parse_client_payload(payload):
 def handle_user_message(vk, user_id, text, payload, attachments, message_id):
     """Главный обработчик сообщений от пользователей."""
     
+    # Обновляем время последнего сообщения пользователя
+    from bot.core import now_utc5
+    store.user_last_message[user_id] = now_utc5()
+    
     state_info = core.get_user_state(user_id)
     state = state_info["state"]
     order = state_info["order"]
@@ -387,7 +391,7 @@ def _handle_idle(vk, user_id, text, state_info, now_t):
     # Кнопка "Заказ" обрабатывается выше, здесь её не проверяем
 
     if text == "🎁 Наши акции":
-        core.send_message(vk, user_id, read_promos_text(), keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
+        core.send_message(vk, user_id, "🎁 Наши акции: https://vk.com/wall-175111431_2701", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
         return
 
     if text == "📍 Адрес для самовывоза":
