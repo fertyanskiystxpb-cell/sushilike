@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, Any, Optional
-from datetime import date
+from datetime import datetime
 
 
 # Хранилище FSM для пользователей.
@@ -20,8 +20,8 @@ accepting_orders_enabled: bool = True
 accepting_orders_reason: str = ""
 
 # Отслеживание последнего сообщения пользователя для приветствий
-# user_last_message[user_id] = date
-user_last_message: Dict[int, date] = {}
+# user_last_message[user_id] = datetime
+user_last_message: Dict[int, datetime] = {}
 
 # Флаг для предотвращения чтения следующего сообщения клиента
 # user_just_replied[user_id] = bool
