@@ -11,7 +11,6 @@ from config import settings
 from database.models import init_db
 from bot import core
 from bot.handlers import user as user_handlers
-from bot.handlers import admin as admin_handlers
 
 
 def handle_event(vk, event):
@@ -25,11 +24,29 @@ def handle_event(vk, event):
     attachments = event.obj.message.get("attachments", [])
     message_id = event.obj.message.get("id")
 
-    if user_id in core.get_operator_ids():
-        if admin_handlers.handle_admin_flow(vk, user_id, text, payload, event):
-            return
-
-    user_handlers.handle_user_message(vk, user_id, text, payload, attachments, message_id)
+    # Проверяем состояние пользователя - если он в процессе заказа, обрабатываем все сообщения
+    from bot import store
+    user_state = store.user_states.get(user_id, {})
+    current_state = user_state.get("state", "IDLE")
+    expecting_order = bool(user_state.get("expecting_order", False))
+    
+    # Проверяем флаг - если бот только что ответил, пропускаем следующее сообщение
+    if store.user_just_replied.get(user_id, False):
+        store.user_just_replied[user_id] = False  # Сбрасываем флаг
+        return  # Пропускаем это сообщение
+    
+    # Для клиентов проверяем, является ли сообщение командой или кнопкой,
+    # или пользователь в процессе заказа
+    if text and (
+        text in ("Начать", "Старт", "🛒 Заказ", "🎁 Наши акции", "📍 Адрес для самовывоза") or
+        text in ("⬅ Назад", "❌ Отменить заказ", "🏠 В главное меню") or
+        text.startswith("!") or  # Админские команды
+        payload or  # Сообщения с payload (кнопки)
+        current_state != "IDLE" or  # Любые сообщения в процессе заказа
+        expecting_order  # Сообщение с заполненной формой заказа
+    ):
+        user_handlers.handle_user_message(vk, user_id, text, payload, attachments, message_id)
+    # Иначе игнорируем сообщение клиента - бот его не читает
 
 
 def run_bot():

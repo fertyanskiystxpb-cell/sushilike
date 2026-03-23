@@ -8,50 +8,10 @@ from config import settings
 from bot import store
 from bot.states import (
     STATE_IDLE,
-    STATE_CHOOSING_FOOD,
-    STATE_SET_CUTLERY,
-    STATE_SET_CUTLERY_CUSTOM,
-    STATE_SET_EXTRA_SET,
-    STATE_SET_ADDRESS,
-    STATE_SET_PHONE,
-    STATE_SET_PAYMENT_METHOD,
-    STATE_SET_PAYMENT_TRANSFER_TIMING,
-    STATE_CONFIRM_ORDER,
-    STATE_PREORDER_CONFIRM,
-    STATE_SET_ORDER_TIME,
+    STATE_WAITING_FOR_CHECK,
 )
 from bot import keyboards as kbd
 
-
-def get_admin_ids():
-    """Список ID операторов из конфига (.env), без учёта БД."""
-    ids_str = getattr(settings, "VK_ADMIN_IDS", "") or ""
-    if ids_str.strip():
-        try:
-            return [int(x.strip()) for x in ids_str.split(",") if x.strip()]
-        except (ValueError, AttributeError):
-            pass
-    return [settings.VK_ADMIN_ID]
-
-
-def get_operator_ids():
-    """Актуальный список операторов: из SQLite (employees), иначе из конфига."""
-    if getattr(settings, "DB_ENABLED", False):
-        try:
-            from database.models import list_employee_ids
-
-            ids = list_employee_ids()
-            if ids:
-                return ids
-        except Exception:
-            pass
-    return get_admin_ids()
-
-
-def get_admin_id():
-    """Первый ID из списка операторов для обратной совместимости."""
-    ids = get_operator_ids()
-    return ids[0] if ids else settings.VK_ADMIN_ID
 
 TRANSFER_INFO_LINES = [
     f"💳 Перевод: Т-банк/Сбербанк",
@@ -77,14 +37,18 @@ ORDER_END_TIME = time(21, 0)
 
 
 def GetTimeBasedGreeting():
+    """Приветствие по времени суток с использованием настроек из конфига."""
     t = now_utc5().time()
     if time(0, 0) <= t < time(6, 0):
-        return "Доброй ночи"
-    if time(6, 0) <= t < time(12, 0):
-        return "Доброе утро"
-    if time(12, 0) <= t < time(18, 0):
-        return "Добрый день"
-    return "Добрый вечер"
+        base_greeting = settings.GREETING_NIGHT
+    elif time(6, 0) <= t < time(12, 0):
+        base_greeting = settings.GREETING_MORNING
+    elif time(12, 0) <= t < time(18, 0):
+        base_greeting = settings.GREETING_DAY
+    else:
+        base_greeting = settings.GREETING_EVENING
+    
+    return base_greeting
 
 
 def get_order_thanks_closing():
@@ -225,18 +189,25 @@ def edit_admin_order_message(vk, order_id, text, keyboard):
 
 def build_order_summary(order_data):
     """Собрать текстовый итог заказа."""
-    lines = [
-        "🧾 Ваш заказ:",
-        f"— Заказ: {order_data.get('food')}",
-        f"— Приборы: {order_data.get('cutlery')}",
-        f"— Доп. набор: {order_data.get('extra_set', '—')}",
-        f"— Адрес доставки: {order_data.get('address')}",
-        f"— Телефон: {order_data.get('phone')}",
-        f"— Оплата: {order_data.get('payment_method')}",
-        f"— Комментарий к заказу: {order_data.get('order_time', '—')}",
-    ]
-    if order_data.get("is_preorder"):
-        lines.append("— Флаг: ПРЕДЗАКАЗ")
+    # Если есть полный текст заказа, используем его
+    if order_data.get('full_text'):
+        lines = [
+            "🧾 Заказ клиента:",
+            order_data.get('full_text'),
+        ]
+    else:
+        lines = [
+            "🧾 Ваш заказ:",
+            f"— Заказ: {order_data.get('food')}",
+            f"— Приборы: {order_data.get('cutlery')}",
+            f"— Доп. набор: {order_data.get('extra_set', '—')}",
+            f"— Адрес доставки: {order_data.get('address')}",
+            f"— Телефон: {order_data.get('phone')}",
+            f"— Оплата: {order_data.get('payment_method')}",
+            f"— Комментарий к заказу: {order_data.get('order_time', '—')}",
+        ]
+        if order_data.get("is_preorder"):
+            lines.append("— Флаг: ПРЕДЗАКАЗ")
     return "\n".join(lines)
 
 
@@ -267,110 +238,104 @@ def cancel_order(vk, user_id):
     )
 
 
-def prompt_for_state(vk, user_id, state):
-    """Отправить пользователю вопрос для текущего шага."""
-    if state == STATE_CHOOSING_FOOD:
-        send_message(
-            vk,
-            user_id,
-            "Что будете заказывать?\n Укажите название или номер.",
-            keyboard=kbd.create_order_nav_keyboard(),
-        )
+def get_setting_from_db(key, default=""):
+    """Получает настройку из базы данных."""
+    if not settings.DB_ENABLED:
+        return default
+        
+    try:
+        from database.models import _connect
+        with _connect() as conn:
+            # Создаем таблицу настроек если нет
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+            return row['value'] if row else default
+    except Exception as e:
+        print(f"[DEBUG] Ошибка получения настройки {key} из БД: {e}")
+        return default
+
+
+def save_setting_to_db(key, value):
+    """Сохраняет настройку в базу данных."""
+    if not settings.DB_ENABLED:
         return
-    if state == STATE_SET_CUTLERY:
-        send_message(
-            vk,
-            user_id,
-            "Сколько приборов (палочек) положить?",
-            keyboard=kbd.create_order_nav_keyboard(),
-        )
-        return
-    if state == STATE_SET_CUTLERY_CUSTOM:
-        send_message(
-            vk,
-            user_id,
-            "Сколько всего приборов вам нужно?",
-            keyboard=kbd.create_order_nav_keyboard(),
-        )
-        return
-    if state == STATE_SET_EXTRA_SET:
-        send_message(
-            vk,
-            user_id,
-            "Имбирь, васаби и соевый соус не входят в стоимость. Общий доп набор рассчитан на 3-4 человека, стоит 100₽. Будете брать?",
-            keyboard=kbd.create_order_nav_keyboard(),
-        )
-        return
-    if state == STATE_SET_ADDRESS:
-        hint = f"\n{settings.DELIVERY_ZONE_HINT}" if settings.DELIVERY_ZONE_HINT else ""
-        send_message(
-            vk,
-            user_id,
-            f"Введите адрес доставки:{hint}".strip(),
-            keyboard=kbd.create_order_nav_keyboard(),
-        )
-        return
-    if state == STATE_SET_PHONE:
-        send_message(vk, user_id, "Введите номер телефона:", keyboard=kbd.create_order_nav_keyboard())
-        return
-    if state == STATE_SET_PAYMENT_METHOD:
-        send_message(vk, user_id, "Выберите способ оплаты:", keyboard=kbd.create_payment_keyboard())
-        return
-    if state == STATE_SET_PAYMENT_TRANSFER_TIMING:
-        send_message(
-            vk,
-            user_id,
-            "Оплатить сейчас или при получении?",
-            keyboard=kbd.create_payment_transfer_timing_keyboard(),
-        )
-        return
-    if state == STATE_SET_ORDER_TIME:
-        send_message(
-            vk,
-            user_id,
-            "Комментарий к заказу.",
-            keyboard=kbd.create_order_nav_keyboard(),
-        )
-        return
-    if state == STATE_PREORDER_CONFIRM:
-        now_dt = now_utc5()
-        start_today = order_start_time_for_date(now_dt.date())
-        now_t = now_dt.time()
-        if now_t < start_today:
-            question = "Мы еще не не открылись, хотите оформить предзаказ?"
-        else:
-            question = "Мы уже закрыты, хотите оформить предзаказ?"
-        send_message(vk, user_id, question, keyboard=kbd.create_preorder_keyboard())
-        return
-    if state == STATE_CONFIRM_ORDER:
-        state_info = get_user_state(user_id)
-        summary = build_order_summary(state_info["order"])
-        send_message(
-            vk,
-            user_id,
-            summary + "\n\nПроверьте, все ли верно.\nНажмите «Подтвердить заказ» или «Отменить».",
-            keyboard=kbd.create_confirm_keyboard(),
-        )
-        return
+        
+    try:
+        from database.models import _connect
+        with _connect() as conn:
+            # Создаем таблицу настроек если нет
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Сохраняем или обновляем настройку
+            conn.execute("""
+                INSERT OR REPLACE INTO settings (key, value, updated_at)
+                VALUES (?, ?, datetime('now'))
+            """, (key, value))
+            
+            conn.commit()
+        
+        # Обновляем в runtime
+        if hasattr(settings, key):
+            setattr(settings, key, value)
+            
+        print(f"[DEBUG] Настройка {key} сохранена в БД: {value}")
+    except Exception as e:
+        print(f"[DEBUG] Ошибка сохранения настройки {key} в БД: {e}")
 
 
 def handle_start_or_menu(vk, user_id):
     """Показать главное меню пользователю."""
     reset_user_state(user_id)
-    greeting = GetTimeBasedGreeting()
-    name = ""
-    try:
-        info = vk.users.get(user_ids=user_id)
-        if info:
-            name = info[0].get("first_name", "")
-    except Exception:
-        pass
-    send_message(
-        vk,
-        user_id,
-        f"{greeting}, {name}! ✨\n\nДобро пожаловать в Суши Лайк — место, где каждый ролл заслуживает твоего сердечка! 🍣❤️\n\nДоставка со вкусом.\n\nЧто делаем дальше? 👇",
-        keyboard=kbd.create_main_menu_keyboard_for_user(user_id),
-    )
+    
+    # Проверяем, нужно ли показывать приветствие (только раз в сутки)
+    from datetime import date
+    today = date.today()
+    show_greeting = True
+    
+    if user_id in store.user_last_message:
+        if store.user_last_message[user_id] == today:
+            show_greeting = False
+    
+    if show_greeting:
+        try:
+            # Получаем базовое приветствие по времени суток
+            greeting_message = GetTimeBasedGreeting()
+            
+            # Получаем информацию о пользователе
+            user_info = vk.users.get(user_ids=user_id)[0]
+            first_name = user_info.get('first_name', 'Гость')
+            
+            # Получаем дополнительный текст из БД
+            extra_text = get_setting_from_db('GREETING_EXTRA') or ''
+            
+            # Формируем приветствие
+            if extra_text.strip():
+                full_greeting = f"{greeting_message}, {first_name}! ✨\n\n{extra_text}"
+            else:
+                full_greeting = f"{greeting_message}, {first_name}! ✨"
+            
+            # Отправляем приветствие с главным меню
+            send_message(vk, user_id, full_greeting, keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
+            
+        except Exception as e:
+            print(f"[DEBUG] Ошибка при отправке приветствия: {e}")
+            send_message(vk, user_id, "Добро пожаловать!", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
+    else:
+        # Если приветствие не нужно, просто отправляем меню
+        send_message(vk, user_id, "Главное меню:", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
 
 
 def sync_order_to_db(order_id: int) -> None:
@@ -394,74 +359,6 @@ def sync_order_to_db(order_id: int) -> None:
         )
     except Exception as e:
         print(f"[DB] sync_order_to_db error: {e}")
-
-
-def register_and_send_order_to_admin(vk, user_id, order_data):
-    """Регистрирует заказ и отправляет админу."""
-    from database.models import save_order_stub
-
-    summary = build_order_summary(order_data)
-    order_id = store.next_order_id
-    store.next_order_id += 1
-    business_date = now_utc5().date().isoformat()
-    store.orders[order_id] = {
-        "client_id": user_id,
-        "order": dict(order_data),
-        "summary": summary,
-        "status": "NEW",
-        "price": None,
-        "gift": None,
-        "admin_message_id": None,
-        "created_at": business_date,
-    }
-    try:
-        save_order_stub(
-            order_id=order_id,
-            user_id=user_id,
-            payload=dict(order_data),
-            status="NEW",
-            business_date=business_date,
-        )
-    except Exception as e:
-        print(f"[DB_STUB] save_order_stub error: {e}")
-
-    if order_data.get("is_preorder"):
-        preorder_flag = "\n\n🗓 ПРЕДЗАКАЗ" if order_data.get("preorder_same_day") else "\n\n🗓 ПРЕДЗАКАЗ (на завтра)"
-    else:
-        preorder_flag = ""
-    client_mention = format_user_mention(vk, user_id)
-    text = f"📩 Новый заказ #{order_id} от клиента {client_mention}:\n\n{summary}{preorder_flag}"
-    keyboard = kbd.create_admin_new_order_keyboard(order_id=order_id, client_id=user_id)
-    kbd_json = keyboard.get_keyboard()
-
-    admin_message_ids = {}
-    for aid in get_operator_ids():
-        try:
-            msg_id = vk.messages.send(
-                user_id=aid,
-                message=text,
-                random_id=0,
-                keyboard=kbd_json,
-            )
-            admin_message_ids[aid] = msg_id
-        except Exception:
-            pass
-    store.orders[order_id]["admin_message_ids"] = admin_message_ids
-    if not admin_message_ids and get_operator_ids():
-        store.orders[order_id]["admin_message_id"] = None
-    for aid in get_operator_ids():
-        try:
-            send_message(vk, aid, "Меню оператора.", keyboard=kbd.create_admin_menu_keyboard())
-        except Exception:
-            pass
-
-    # Сразу после оформления — реквизиты всем; просьба о чеке только при «Переводом сейчас».
-    send_message(
-        vk,
-        user_id,
-        build_client_order_placed_message(order_data),
-        keyboard=kbd.create_main_menu_keyboard_for_user(user_id),
-    )
 
 
 def get_daily_stats():
