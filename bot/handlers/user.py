@@ -329,10 +329,6 @@ def _parse_client_payload(payload):
 def handle_user_message(vk, user_id, text, payload, attachments, message_id):
     """Главный обработчик сообщений от пользователей."""
     
-    # Обновляем время последнего сообщения пользователя
-    from bot.core import now_utc5
-    store.user_last_message[user_id] = now_utc5()
-    
     state_info = core.get_user_state(user_id)
     state = state_info["state"]
     order = state_info["order"]
