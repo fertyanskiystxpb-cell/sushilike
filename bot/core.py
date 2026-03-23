@@ -347,9 +347,6 @@ def handle_start_or_menu(vk, user_id):
     else:
         # Если приветствие не нужно, просто отправляем меню
         send_message(vk, user_id, "Главное меню:", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
-    
-    # Обновляем время последнего сообщения
-    store.user_last_message[user_id] = now
 
 
 def sync_order_to_db(order_id: int) -> None:

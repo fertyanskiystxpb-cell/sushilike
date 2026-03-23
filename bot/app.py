@@ -92,6 +92,8 @@ def handle_event(vk, event):
     ):
         print(f"[DEBUG] Обрабатываем сообщение от {user_id}")
         user_handlers.handle_user_message(vk, user_id, text, payload, attachments, message_id)
+        # Обновляем время последнего сообщения ПОСЛЕ обработки
+        store.user_last_message[user_id] = core.now_utc5()
     else:
         print(f"[DEBUG] Игнорируем сообщение от {user_id}")
     # Иначе игнорируем сообщение клиента - бот его не читает
