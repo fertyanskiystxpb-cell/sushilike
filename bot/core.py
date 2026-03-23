@@ -334,7 +334,7 @@ def handle_start_or_menu(vk, user_id):
             
             # Формируем приветствие
             if extra_text.strip():
-                full_greeting = f"{greeting_message}, {first_name}! ✨\n\n{extra_text}"
+                full_greeting = f"{greeting_message}, {first_name}! ✨\n{extra_text}"
             else:
                 full_greeting = f"{greeting_message}, {first_name}! ✨"
             
