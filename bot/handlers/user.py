@@ -146,10 +146,67 @@ def _process_complete_order(vk, user_id, text, state_info, order):
 
 def _handle_admin_command(vk, user_id, text):
     """Обработка админских команд."""
-    print(f"[DEBUG] Админ команда от {user_id} (админ ID: {settings.VK_ADMIN_ID}): {text}")
+    parts = text.split()
+    if not parts:
+        return None
     
-    parts = text.split(' ', 2)
     command = parts[0].lower()
+    
+    if command == "!диагностика":
+        # Показываем информацию о всех пользователях
+        from bot import store
+        from bot.core import now_utc5
+        from datetime import timedelta
+        
+        msg = "📊 Диагностика пользователей:\n\n"
+        
+        # Информация о user_states
+        msg += f"👥 Всего пользователей в user_states: {len(store.user_states)}\n"
+        msg += f"📨 Всего пользователей в user_last_message: {len(store.user_last_message)}\n\n"
+        
+        # Показываем последние 10 пользователей из user_states
+        msg += "🔍 Последние пользователи в user_states:\n"
+        for uid, state in list(store.user_states.items())[-10:]:
+            msg += f"• ID{uid}: {state.get('state', 'IDLE')}\n"
+        
+        msg += "\n🕐 Последние сообщения:\n"
+        for uid, timestamp in list(store.user_last_message.items())[-10:]:
+            if isinstance(timestamp, str):
+                msg += f"• ID{uid}: {timestamp}\n"
+            else:
+                time_diff = now_utc5() - timestamp
+                msg += f"• ID{uid}: {time_diff} назад\n"
+        
+        core.send_message(vk, user_id, msg)
+        return
+    
+    if command == "!добавить_пользователя" and len(parts) >= 2:
+        try:
+            target_user_id = int(parts[1])
+            from bot import store
+            from bot.core import now_utc5
+            
+            # Создаем состояние пользователя
+            if target_user_id not in store.user_states:
+                store.user_states[target_user_id] = {
+                    "state": "IDLE",
+                    "order": {},
+                    "history": [],
+                    "active_order_id": None,
+                }
+                print(f"[DEBUG] Создано состояние для пользователя {target_user_id}")
+            
+            # Устанавливаем время последнего сообщения (чтобы не было приветствия)
+            store.user_last_message[target_user_id] = now_utc5()
+            
+            core.send_message(vk, user_id, f"✅ Пользователь ID{target_user_id} добавлен в систему")
+            print(f"[DEBUG] Пользователь {target_user_id} добавлен в систему")
+            
+        except ValueError:
+            core.send_message(vk, user_id, "❌ Неверный формат ID пользователя. Используйте: !добавить_пользователя 123456789")
+        except Exception as e:
+            core.send_message(vk, user_id, f"❌ Ошибка: {e}")
+        return
     
     if command == "!приветствие" and len(parts) >= 2:
         action = parts[1].lower()
@@ -395,7 +452,8 @@ def _handle_idle(vk, user_id, text, state_info, now_t):
         return
 
     if text == "📍 Адрес для самовывоза":
-        core.send_message(vk, user_id, f"📍 Адрес для самовывоза:\n{settings.ORDER_ADDRESS_TEXT}")
+        address_text = settings.ORDER_ADDRESS_TEXT.replace('\\n', '\n')
+        core.send_message(vk, user_id, f"📍 Адрес для самовывоза:\n{address_text}")
         return
 
     # Если это не известная команда или кнопка, возвращаем в главное меню
