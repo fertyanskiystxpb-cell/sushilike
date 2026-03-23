@@ -82,7 +82,7 @@ def handle_event(vk, event):
     print(f"[DEBUG] should_handle_any_message: {should_handle_any_message}")
     
     if text and (
-        text in ("Начать", "Старт", "🛒 Заказ", "🎁 Наши акции", "📍 Адрес для самовывоза") or
+        text in ("Начать", "Старт", "🛒 Заказ", "📍 Адрес для самовывоза") or
         text in ("⬅ Назад", "❌ Отменить заказ", "🏠 В главное меню") or
         text.startswith("!") or  # Админские команды
         payload or  # Сообщения с payload (кнопки)

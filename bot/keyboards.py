@@ -13,7 +13,7 @@ from bot.states import (
 def create_main_menu_keyboard() -> VkKeyboard:
     """Главное меню. Только требуемые кнопки."""
     keyboard = VkKeyboard(one_time=False, inline=False)
-    keyboard.add_button("🎁 Наши акции", "https://vk.com/wall-175111431_2701")
+    keyboard.add_openlink_button("🎁 Наши акции", "https://vk.com/wall-175111431_2701")
     keyboard.add_line()
     keyboard.add_openlink_button("📋 Наше меню", "https://vk.com/market-175111431")
     keyboard.add_line()
