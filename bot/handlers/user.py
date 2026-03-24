@@ -350,31 +350,6 @@ def handle_user_message(vk, user_id, text, payload, attachments, message_id):
             core.send_message(vk, user_id, "❌ Ошибка проверки прав доступа.")
             return
 
-    # Проверяем кнопку "Заказ" (кнопка убрана из меню, но обработка остаётся)
-    if text == "🛒 Заказ":
-        print(f"[DEBUG] Нажата кнопка 'Заказ' пользователем {user_id}")
-        # Отправляем сообщение с формой заказа
-        order_form = """Укажите:
-- что будете заказывать;
-- количество приборов;
-- требуется ли доп набор (имбирь васаби и соевый соус);
-- адрес доставки;
-- номер для связи;
-- способ оплаты;
-После того, как заполните форму ожидайте ответа оператора"""
-        
-        # Создаем клавиатуру только с кнопкой "Отменить заказ"
-        cancel_keyboard = kbd.create_cancel_order_keyboard()
-        core.send_message(vk, user_id, order_form, keyboard=cancel_keyboard)
-        
-        # Устанавливаем флаг, чтобы пропустить следующее сообщение
-        store.user_just_replied[user_id] = True
-        
-        # НЕ переходим в состояние заказа - ждем полного заказа от клиента
-        # Оставляем пользователя в состоянии IDLE но с флагом что ожидаем заказ
-        state_info["expecting_order"] = True
-        return
-
     print(f"[DEBUG] Получено сообщение от {user_id}: '{text}'")
     print(f"[DEBUG] Состояние пользователя: {state}")
     print(f"[DEBUG] Ожидание заказа: {state_info.get('expecting_order', False)}")
