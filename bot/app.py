@@ -45,57 +45,21 @@ def handle_event(vk, event):
         store.user_just_replied[user_id] = False  # Сбрасываем флаг
         return  # Пропускаем это сообщение
     
-    # Для клиентов проверяем, является ли сообщение командой или кнопкой,
-    # или пользователь в процессе заказа, или это новое сообщение после долгого отсутствия
-    from datetime import timedelta
-    
-    # Проверяем, нужно ли обрабатывать любое сообщение
-    should_handle_any_message = False
-    
-    # Если пользователя нет вообще нигде - это возможно новый или старый клиент
-    if user_id not in store.user_states and user_id not in store.user_last_message:
-        print(f"[DEBUG] Пользователь не найден в системе - обрабатываем как нового")
-        should_handle_any_message = True
-    # Если пользователя нет в user_last_message, но есть в user_states - это старый пользователь
-    elif user_id not in store.user_last_message and user_id in store.user_states:
-        print(f"[DEBUG] Старый пользователь без времени последнего сообщения - обрабатываем")
-        should_handle_any_message = True
-    elif user_id in store.user_last_message:
-        last_time = store.user_last_message[user_id]
-        if isinstance(last_time, str):
-            # Обратная совместимость со старым форматом
-            try:
-                from datetime import datetime
-                last_time = datetime.fromisoformat(last_time)
-            except:
-                should_handle_any_message = True
-        else:
-            # Если прошло более 12 часов, обрабатываем любое сообщение
-            time_diff = core.now_utc5() - last_time
-            should_handle_any_message = time_diff > timedelta(hours=12)
-            print(f"[DEBUG] Время с последнего сообщения: {time_diff}")
-    else:
-        # Нового пользователя обрабатываем всегда
-        should_handle_any_message = True
-        print(f"[DEBUG] Новый пользователь - обрабатываем")
-    
-    print(f"[DEBUG] should_handle_any_message: {should_handle_any_message}")
-    
+    # Для клиентов обрабатываем только кнопки и команды, игнорируем обычные сообщения
     if text and (
-        text in ("Начать", "Старт", "🛒 Заказ", "📍 Адрес для самовывоза") or
+        text in ("Начать", "Старт", " Адрес для самовывоза") or
         text in ("⬅ Назад", "❌ Отменить заказ", "🏠 В главное меню") or
         text.startswith("!") or  # Админские команды
         payload or  # Сообщения с payload (кнопки)
         current_state != "IDLE" or  # Любые сообщения в процессе заказа
-        expecting_order or  # Сообщение с заполненной формой заказа
-        should_handle_any_message  # Любые сообщения после 12 часов тишины или от нового/старого пользователя
+        expecting_order  # Сообщение с заполненной формой заказа
     ):
         print(f"[DEBUG] Обрабатываем сообщение от {user_id}")
         user_handlers.handle_user_message(vk, user_id, text, payload, attachments, message_id)
         # Обновляем время последнего сообщения ПОСЛЕ обработки
         store.user_last_message[user_id] = core.now_utc5()
     else:
-        print(f"[DEBUG] Игнорируем сообщение от {user_id}")
+        print(f"[DEBUG] Игнорируем сообщение от {user_id} - не команда/кнопка")
     # Иначе игнорируем сообщение клиента - бот его не читает
 
 

@@ -220,7 +220,7 @@ def go_back(vk, user_id, state_info):
     """Вернуться на предыдущий шаг оформления заказа."""
     if not state_info["history"]:
         state_info["state"] = STATE_IDLE
-        send_message(vk, user_id, "Вы в главном меню.", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
+        send_message(vk, user_id, "", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
         return
     prev_state = state_info["history"].pop()
     state_info["state"] = prev_state
@@ -300,53 +300,8 @@ def handle_start_or_menu(vk, user_id):
     """Показать главное меню пользователю."""
     reset_user_state(user_id)
     
-    # Проверяем, нужно ли показывать приветствие (раз в 12 часов)
-    from datetime import datetime, timedelta
-    now = now_utc5()
-    show_greeting = True
-    
-    if user_id in store.user_last_message:
-        last_msg_time = store.user_last_message[user_id]
-        if isinstance(last_msg_time, datetime):
-            # Если прошло меньше 12 часов с последнего сообщения, не показываем приветствие
-            if now - last_msg_time < timedelta(hours=12):
-                show_greeting = False
-        elif isinstance(last_msg_time, str):
-            # Обратная совместимость со старым форматом (дата)
-            try:
-                last_date = datetime.fromisoformat(last_msg_time).date()
-                if last_date == now.date():
-                    show_greeting = False
-            except:
-                pass
-    
-    if show_greeting:
-        try:
-            # Получаем базовое приветствие по времени суток
-            greeting_message = GetTimeBasedGreeting()
-            
-            # Получаем информацию о пользователе
-            user_info = vk.users.get(user_ids=user_id)[0]
-            first_name = user_info.get('first_name', 'Гость')
-            
-            # Получаем дополнительный текст из БД
-            extra_text = get_setting_from_db('GREETING_EXTRA') or ''
-            
-            # Формируем приветствие
-            if extra_text.strip():
-                full_greeting = f"{greeting_message}, {first_name}! ✨\n\n{extra_text}"
-            else:
-                full_greeting = f"{greeting_message}, {first_name}! ✨"
-            
-            # Отправляем приветствие с главным меню
-            send_message(vk, user_id, full_greeting, keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
-            
-        except Exception as e:
-            print(f"[DEBUG] Ошибка при отправке приветствия: {e}")
-            send_message(vk, user_id, "Добро пожаловать!", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
-    else:
-        # Если приветствие не нужно, просто отправляем меню
-        send_message(vk, user_id, "Главное меню:", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
+    # Всегда отправляем пустое сообщение с главным меню
+    send_message(vk, user_id, "", keyboard=kbd.create_main_menu_keyboard_for_user(user_id))
 
 
 def sync_order_to_db(order_id: int) -> None:
